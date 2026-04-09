@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grid World — RL Explorer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0d0f14; --surface: #141720; --surface2: #1c2030;
+    --border: rgba(255,255,255,0.07); --border2: rgba(255,255,255,0.13);
+    --text: #e8e6df; --muted: #6b6f7e;
+    --accent: #c8f060; --accent2: #60d4f0; --warn: #f0a060;
+    --success: #60f0a0; --danger: #f06060;
+    --mono: 'IBM Plex Mono', monospace; --serif: 'DM Serif Display', serif;
+  }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: var(--mono); font-size: 13px;
+    min-height: 100vh; overflow-x: hidden;
+  }
+  body::before {
+    content: ''; position: fixed; inset: 0;
+    background-image: radial-gradient(circle, rgba(255,255,255,0.035) 1px, transparent 1px);
+    background-size: 28px 28px; pointer-events: none; z-index: 0;
+  }
+  .app { position: relative; z-index: 1; max-width: 1120px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+
+  /* ── Header ── */
+  header { margin-bottom: 2rem; border-bottom: 1px solid var(--border2); padding-bottom: 1.25rem; }
+  .header-top { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 1rem; }
+  h1 { font-family: var(--serif); font-size: 2rem; font-weight: 400; color: var(--text); }
+  h1 em { font-style: italic; color: var(--accent); }
+  .header-meta { font-size: 10px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
+  .subtitle { margin-top: .4rem; font-size: 12px; color: var(--muted); line-height: 1.7; }
+  .api-status { display: flex; align-items: center; gap: 6px; font-size: 11px; margin-top: .6rem; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); transition: background .3s; }
+  .dot.ok { background: var(--success); box-shadow: 0 0 6px rgba(96,240,160,.5); }
+  .dot.err { background: var(--danger); }
+
+  /* ── Tabs ── */
+  .tabs { display: flex; gap: 0; margin-bottom: 1.25rem; border: 1px solid var(--border2); border-radius: 6px; overflow: hidden; width: fit-content; }
+  .tab { padding: 7px 18px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; background: transparent; color: var(--muted); border: none; border-right: 1px solid var(--border2); cursor: pointer; transition: all .15s; }
+  .tab:last-child { border-right: none; }
+  .tab.active { background: var(--surface2); color: var(--accent); }
+  .tab:hover:not(.active) { color: var(--text); background: rgba(255,255,255,0.025); }
+
+  /* ── Layout ── */
+  .main { display: grid; grid-template-columns: auto 1fr; gap: 2rem; align-items: start; }
+  @media (max-width: 720px) { .main { grid-template-columns: 1fr; } }
+
+  /* ── Grid ── */
+  .grid-section { display: flex; gap: 0; }
+  .axis-y { display: flex; flex-direction: column; gap: 3px; margin-right: 5px; padding-top: 3px; }
+  .axis-y-label { width: 18px; height: 88px; display: flex; align-items: center; justify-content: center; font-size: 9px; color: var(--muted); }
+  #grid { display: grid; grid-template-columns: repeat(4, 88px); gap: 3px; background: var(--border); border: 1px solid var(--border2); border-radius: 8px; padding: 3px; }
+  .axis-x { display: flex; gap: 3px; margin-top: 5px; padding-left: 23px; }
+  .axis-x-label { width: 88px; text-align: center; font-size: 9px; color: var(--muted); }
+
+  .cell {
+    width: 88px; height: 88px; background: var(--surface); border-radius: 5px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    position: relative; transition: background .35s; overflow: hidden;
+  }
+  .cell .heat {
+    position: absolute; inset: 0; border-radius: 5px;
+    background: transparent; transition: background .35s; pointer-events: none;
+  }
+  .cell.goal { background: rgba(96,240,160,.07); border: 1px solid rgba(96,240,160,.2); }
+  .cell .arrow { font-size: 22px; line-height: 1; position: relative; z-index: 1; transition: all .2s; }
+  .cell .val { font-size: 10px; color: var(--muted); position: relative; z-index: 1; transition: color .3s; font-variant-numeric: tabular-nums; }
+  .cell .coord { font-size: 9px; color: rgba(255,255,255,0.13); position: relative; z-index: 1; }
+  .cell.goal .arrow { color: var(--success); text-shadow: 0 0 10px rgba(96,240,160,.55); }
+  @keyframes pulse { 0%{opacity:.9} 50%{opacity:.5} 100%{opacity:.9} }
+  .cell.loading .arrow { animation: pulse .8s ease-in-out infinite; }
+
+  .legend { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding-left: 23px; }
+  .legend-bar { flex: 1; height: 4px; border-radius: 2px; background: linear-gradient(to right, rgba(59,106,173,.2), rgba(200,240,96,.45)); }
+  .legend-lbl { font-size: 9px; color: var(--muted); }
+
+  /* ── Phase badge ── */
+  .phase-badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 10px; letter-spacing: .05em; text-transform: uppercase; margin-left: 8px; }
+  .phase-badge.eval { background: rgba(96,212,240,.12); color: var(--accent2); }
+  .phase-badge.improve { background: rgba(200,240,96,.12); color: var(--accent); }
+  .phase-badge.done { background: rgba(96,240,160,.12); color: var(--success); }
+  .phase-badge.idle { background: rgba(255,255,255,.05); color: var(--muted); }
+
+  /* ── Right panel ── */
+  .panel { display: flex; flex-direction: column; gap: .9rem; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: .9rem 1.1rem; }
+  .card-title { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+  .stat { background: var(--surface2); border-radius: 5px; padding: 7px 9px; }
+  .stat-lbl { font-size: 9px; color: var(--muted); letter-spacing: .07em; text-transform: uppercase; }
+  .stat-val { font-size: 19px; font-weight: 500; color: var(--text); margin-top: 2px; line-height: 1; }
+  .stat-val.g { color: var(--success); } .stat-val.y { color: var(--accent); } .stat-val.b { color: var(--accent2); }
+
+  .controls { display: flex; flex-direction: column; gap: 9px; }
+  .btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .btn { font-family: var(--mono); font-size: 11px; letter-spacing: .05em; text-transform: uppercase; padding: 7px 13px; border-radius: 5px; border: 1px solid var(--border2); background: transparent; color: var(--text); cursor: pointer; transition: all .15s; }
+  .btn:hover:not(:disabled) { background: var(--surface2); border-color: rgba(255,255,255,.2); }
+  .btn.primary { background: var(--accent); color: #0d0f14; border-color: var(--accent); font-weight: 500; }
+  .btn.primary:hover:not(:disabled) { background: #d4f570; }
+  .btn:disabled { opacity: .35; cursor: not-allowed; }
+
+  .slider-row { display: flex; align-items: center; gap: 10px; }
+  .slider-lbl { font-size: 11px; color: var(--muted); min-width: 86px; }
+  .slider-val { font-size: 12px; color: var(--accent); min-width: 40px; text-align: right; }
+  input[type=range] { flex: 1; -webkit-appearance: none; height: 2px; background: var(--border2); border-radius: 2px; outline: none; cursor: pointer; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg); cursor: pointer; }
+  input[type=range]::-moz-range-thumb { width: 13px; height: 13px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg); cursor: pointer; }
+
+  .concept { font-size: 12px; color: var(--muted); line-height: 1.85; }
+  .concept strong { color: var(--text); font-weight: 500; }
+  .concept code { color: var(--accent2); font-size: 11px; }
+
+  #trace { height: 150px; overflow-y: auto; font-size: 11px; line-height: 1.75; color: var(--muted); scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+  #trace::-webkit-scrollbar { width: 3px; }
+  #trace::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+  .tline { padding: 1px 0; border-bottom: 1px solid rgba(255,255,255,.025); }
+  .tline .ts { color: rgba(255,255,255,.18); margin-right: 6px; }
+  .tline.hi { color: var(--accent); } .tline.ok { color: var(--success); } .tline.err { color: var(--danger); }
+
+  /* ── Compare section ── */
+  .compare { margin-top: 2rem; }
+  .section-title { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: .9rem; display: flex; align-items: center; gap: 10px; }
+  .section-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+  .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 600px) { .compare-grid { grid-template-columns: 1fr; } }
+  .ccard { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: .9rem 1rem; }
+  .ccard h3 { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 8px; }
+  .ccard h3.pi { color: var(--accent2); } .ccard h3.vi { color: var(--warn); }
+  .citem { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 11px; }
+  .citem:last-child { border: none; }
+  .citem .k { color: var(--muted); } .citem .v { color: var(--text); }
+
+  footer { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--border); font-size: 10px; color: var(--muted); letter-spacing: .05em; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+  footer a { color: var(--muted); text-decoration: none; }
+  footer a:hover { color: var(--text); }
+
+  .error-banner { background: rgba(240,96,96,.1); border: 1px solid rgba(240,96,96,.25); border-radius: 6px; padding: 8px 12px; font-size: 12px; color: var(--danger); margin-bottom: 1rem; display: none; }
+  .error-banner.show { display: block; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header>
+    <div class="header-top">
+      <h1>Grid World <em>RL</em> Explorer</h1>
+      <span class="header-meta">Dynamic Programming · 4 × 4</span>
+    </div>
+    <p class="subtitle">Policy Iteration and Value Iteration on a 4×4 MDP. Step through Bellman backups and watch the value function and optimal policy converge in real time.</p>
+    <div class="api-status">
+      <div class="dot" id="api-dot"></div>
+      <span id="api-label" style="color:var(--muted)">Connecting to backend…</span>
+    </div>
+  </header>
+
+  <div class="error-banner" id="err-banner"></div>
+
+  <div class="tabs">
+    <button class="tab active" id="tab-pi" onclick="setAlgo('pi')">Policy Iteration</button>
+    <button class="tab" id="tab-vi" onclick="setAlgo('vi')">Value Iteration</button>
+  </div>
+
+  <div class="main">
+
+    <!-- Grid -->
+    <div>
+      <div style="font-size:10px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;">
+        State Space
+        <span class="phase-badge idle" id="phase-badge">Idle</span>
+      </div>
+      <div class="grid-section">
+        <div class="axis-y" id="axis-y"></div>
+        <div>
+          <div id="grid"></div>
+          <div class="axis-x" id="axis-x"></div>
+        </div>
+      </div>
+      <div class="legend">
+        <span class="legend-lbl">V low</span>
+        <div class="legend-bar"></div>
+        <span class="legend-lbl">V high</span>
+      </div>
+    </div>
+
+    <!-- Panel -->
+    <div class="panel">
+
+      <div class="card">
+        <div class="card-title">Diagnostics</div>
+        <div class="stats">
+          <div class="stat"><div class="stat-lbl">Iteration</div><div class="stat-val y" id="s-iter">0</div></div>
+          <div class="stat"><div class="stat-lbl">Δ max</div><div class="stat-val b" id="s-delta">—</div></div>
+          <div class="stat"><div class="stat-lbl">Status</div><div class="stat-val g" id="s-status">Ready</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Controls</div>
+        <div class="controls">
+          <div class="btn-row">
+            <button class="btn primary" id="btn-step" onclick="doStep()">▶ Step</button>
+            <button class="btn" id="btn-auto" onclick="toggleAuto()">Auto Run</button>
+            <button class="btn" id="btn-runall" onclick="doRunAll()">Run All</button>
+            <button class="btn" onclick="doReset()">↺ Reset</button>
+          </div>
+          <div class="slider-row">
+            <span class="slider-lbl">Speed</span>
+            <input type="range" min="1" max="12" value="5" id="speed-sl" oninput="document.getElementById('speed-lbl').textContent=this.value">
+            <span class="slider-val" id="speed-lbl">5</span>
+          </div>
+          <div class="slider-row">
+            <span class="slider-lbl">γ (discount)</span>
+            <input type="range" min="50" max="99" value="90" id="gamma-sl" oninput="onParamChange()">
+            <span class="slider-val" id="gamma-lbl">0.90</span>
+          </div>
+          <div class="slider-row">
+            <span class="slider-lbl">Step reward</span>
+            <input type="range" min="-30" max="-1" value="-4" id="rew-sl" oninput="onParamChange()">
+            <span class="slider-val" id="rew-lbl">−0.04</span>
+          </div>
+          <div style="font-size:11px;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap;">
+            <span>θ = 1e-4</span><span>grid = 4×4</span><span>goal = (3,3)</span><span>R_goal = +1.0</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Algorithm</div>
+        <div class="concept" id="concept-text"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Convergence Log</div>
+        <div id="trace"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Compare -->
+  <div class="compare">
+    <div class="section-title">Algorithm Comparison</div>
+    <div class="compare-grid">
+      <div class="ccard">
+        <h3 class="pi">Policy Iteration</h3>
+        <div class="citem"><span class="k">Convergence</span><span class="v">Fewer outer iterations</span></div>
+        <div class="citem"><span class="k">Per-step cost</span><span class="v">High — full eval sweep</span></div>
+        <div class="citem"><span class="k">Policy quality</span><span class="v">Exact at each step</span></div>
+        <div class="citem"><span class="k">Best for</span><span class="v">Small / medium MDPs</span></div>
+        <div class="citem"><span class="k">Guarantee</span><span class="v">Monotone improvement</span></div>
+      </div>
+      <div class="ccard">
+        <h3 class="vi">Value Iteration</h3>
+        <div class="citem"><span class="k">Convergence</span><span class="v">More sweeps needed</span></div>
+        <div class="citem"><span class="k">Per-step cost</span><span class="v">Low — one max sweep</span></div>
+        <div class="citem"><span class="k">Policy quality</span><span class="v">Extracted at end</span></div>
+        <div class="citem"><span class="k">Best for</span><span class="v">Large state spaces</span></div>
+        <div class="citem"><span class="k">Guarantee</span><span class="v">Contraction mapping</span></div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <span>Grid World · Dynamic Programming · RL Explorer</span>
+    <span>Backend: <a href="http://localhost:5000/api/health" target="_blank">localhost:5000</a> &nbsp;|&nbsp; γ-discounted MDP · Bellman optimality</span>
+  </footer>
+
+</div>
+
+<script>
+const API = 'http://localhost:5000/api';
+const ARROWS = {UP:'↑', DOWN:'↓', LEFT:'←', RIGHT:'→', GOAL:'★', RIGHT_DEFAULT:'→'};
+const CONCEPTS = {
+  pi: `<strong>Policy Evaluation</strong><br>For the fixed policy π, apply:<br><code>V(s) ← R(s') + γ · V(s')</code><br>until |ΔV| < θ — then improve.<br><br><strong>Policy Improvement</strong><br><code>π(s) ← argmax_a [R(s') + γ · V(s')]</code><br>Repeat until no policy changes.`,
+  vi: `<strong>Bellman Optimality</strong><br>Each sweep applies:<br><code>V(s) ← max_a [R(s') + γ · V(s')]</code><br><br>Combines eval + improvement.<br>Policy is extracted once V converges.`
+};
+
+let algo = 'pi', autoTimer = null, autoRunning = false;
+let converged = false, traces = [], lastV = null;
+
+// ── API helpers ──────────────────────────────────────────────────────────────
+
+async function api(path, body) {
+  try {
+    const res = await fetch(API + path, {
+      method: body !== undefined ? 'POST' : 'GET',
+      headers: {'Content-Type': 'application/json'},
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch(e) {
+    showError(`API error: ${e.message}. Is the Flask server running? Run: python app.py`);
+    return null;
+  }
+}
+
+async function checkHealth() {
+  const data = await api('/health');
+  const dot = document.getElementById('api-dot');
+  const lbl = document.getElementById('api-label');
+  if (data) {
+    dot.className = 'dot ok';
+    lbl.style.color = 'var(--success)';
+    lbl.textContent = `Connected · grid ${data.grid}×${data.grid} · goal (${data.goal.join(',')})`;
+    hideError();
+  } else {
+    dot.className = 'dot err';
+    lbl.style.color = 'var(--danger)';
+    lbl.textContent = 'Backend offline — start with: python app.py';
+  }
+}
+
+// ── Actions ──────────────────────────────────────────────────────────────────
+
+function params() {
+  return {
+    algo,
+    gamma: parseFloat(document.getElementById('gamma-sl').value) / 100,
+    step_reward: parseFloat(document.getElementById('rew-sl').value) / 100,
+  };
+}
+
+async function doReset() {
+  if (autoRunning) toggleAuto();
+  converged = false; traces = []; lastV = null;
+  clearTrace();
+  setBtns(false);
+  const data = await api('/reset', params());
+  if (data) applyState(data);
+}
+
+async function doStep() {
+  if (converged) return;
+  const data = await api('/step');
+  if (data) {
+    if (data.delta !== null && data.delta !== undefined) {
+      document.getElementById('s-delta').textContent = parseFloat(data.delta).toFixed(5);
+    }
+    applyState(data);
+  }
+}
+
+async function doRunAll() {
+  if (autoRunning) toggleAuto();
+  if (converged) return;
+  document.getElementById('btn-runall').disabled = true;
+  document.getElementById('btn-step').disabled = true;
+  const p = params();
+  const data = await api('/run', p);
+  if (data) {
+    const history = data.history || [];
+    // Replay history visually (last frame shown)
+    if (history.length > 0) {
+      const last = history[history.length - 1];
+      applyGrid(last.V, last.policy);
+      data.log = [{type:'ok', msg:`✓ ${algo==='pi'?'Policy':'Value'} Iteration converged in ${data.iterations} iterations`}];
+      if (algo === 'pi') {
+        const totalSweeps = history.reduce((s,h) => s+(h.eval_sweeps||0), 0);
+        data.log.unshift({type:'', msg:`Total eval sweeps: ${totalSweeps}`});
+      }
+      data.log.unshift({type:'hi', msg:`Ran ${data.iterations} outer iterations`});
+    }
+    converged = true;
+    document.getElementById('s-iter').textContent = data.iterations;
+    document.getElementById('s-status').textContent = 'Converged';
+    document.getElementById('s-delta').textContent = '< 1e-4';
+    setBadge('done');
+    if (data.log) data.log.forEach(l => pushTrace(l.msg, l.type, data.iterations));
+    setBtns(true);
+  }
+}
+
+function toggleAuto() {
+  autoRunning = !autoRunning;
+  document.getElementById('btn-auto').textContent = autoRunning ? '⏸ Pause' : 'Auto Run';
+  if (autoRunning) {
+    async function tick() {
+      if (!autoRunning || converged) { autoRunning = false; document.getElementById('btn-auto').textContent = 'Auto Run'; return; }
+      await doStep();
+      const speed = parseInt(document.getElementById('speed-sl').value);
+      autoTimer = setTimeout(tick, Math.round(700 / speed));
+    }
+    tick();
+  } else {
+    clearTimeout(autoTimer);
+  }
+}
+
+function onParamChange() {
+  const g = parseInt(document.getElementById('gamma-sl').value);
+  const r = parseInt(document.getElementById('rew-sl').value);
+  document.getElementById('gamma-lbl').textContent = (g/100).toFixed(2);
+  document.getElementById('rew-lbl').textContent = (r/100).toFixed(2);
+  doReset();
+}
+
+function setAlgo(a) {
+  algo = a;
+  document.getElementById('tab-pi').classList.toggle('active', a==='pi');
+  document.getElementById('tab-vi').classList.toggle('active', a==='vi');
+  document.getElementById('concept-text').innerHTML = CONCEPTS[a];
+  doReset();
+}
+
+// ── Render ───────────────────────────────────────────────────────────────────
+
+function applyState(data) {
+  if (!data) return;
+  const iter = data.iteration ?? 0;
+  document.getElementById('s-iter').textContent = iter;
+  if (data.converged) {
+    document.getElementById('s-status').textContent = 'Converged';
+    setBadge('done');
+    converged = true;
+    setBtns(true);
+  } else {
+    document.getElementById('s-status').textContent = data.phase === 'eval' ? 'Evaluating' : 'Improving';
+    setBadge(data.phase || 'eval');
+  }
+  if (data.V && data.policy) applyGrid(data.V, data.policy);
+  if (data.log) {
+    data.log.slice(-(traces.length < 5 ? data.log.length : 3)).forEach(l => pushTrace(l.msg, l.type, iter));
+  }
+}
+
+function applyGrid(V, policy) {
+  let flat = V.flat();
+  let vmin = Math.min(...flat), vmax = Math.max(...flat);
+  document.querySelectorAll('.cell').forEach((cell, idx) => {
+    let i = Math.floor(idx/4), j = idx%4;
+    let isGoal = i===3 && j===3;
+    let v = V[i][j];
+    let norm = vmax > vmin ? (v-vmin)/(vmax-vmin) : 0;
+    cell.querySelector('.arrow').textContent = isGoal ? '★' : (ARROWS[policy[i][j]] || '→');
+    cell.querySelector('.val').textContent = v.toFixed(3);
+    cell.querySelector('.val').style.color = norm > 0.6 ? 'rgba(200,240,96,0.75)' : 'var(--muted)';
+    if (!isGoal) {
+      let alpha = 0.04 + norm * 0.24;
+      let r = Math.round(48 + norm*145), g2 = Math.round(106 + norm*75), b = Math.round(173 - norm*100);
+      cell.querySelector('.heat').style.background = `rgba(${r},${g2},${b},${alpha.toFixed(2)})`;
+    }
+  });
+  lastV = V;
+}
+
+// ── Trace ────────────────────────────────────────────────────────────────────
+
+function pushTrace(msg, cls, iter) {
+  traces.push({msg, cls: cls||'', iter: String(iter||0).padStart(3,'0')});
+  if (traces.length > 80) traces.shift();
+  renderTrace();
+}
+
+function renderTrace() {
+  const el = document.getElementById('trace');
+  el.innerHTML = traces.map(t =>
+    `<div class="tline ${t.cls}"><span class="ts">${t.iter}</span>${esc(t.msg)}</div>`
+  ).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+function clearTrace() {
+  traces = [];
+  document.getElementById('trace').innerHTML = '';
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+
+// ── UI helpers ───────────────────────────────────────────────────────────────
+
+function setBadge(phase) {
+  const b = document.getElementById('phase-badge');
+  b.className = 'phase-badge ' + phase;
+  b.textContent = {eval:'Evaluation', improve:'Improvement', done:'Converged', idle:'Idle'}[phase] || phase;
+}
+
+function setBtns(done) {
+  document.getElementById('btn-step').disabled = done;
+  document.getElementById('btn-auto').disabled = done;
+  document.getElementById('btn-runall').disabled = done;
+}
+
+function showError(msg) {
+  const b = document.getElementById('err-banner');
+  b.textContent = msg; b.classList.add('show');
+}
+function hideError() { document.getElementById('err-banner').classList.remove('show'); }
+
+// ── Build DOM ────────────────────────────────────────────────────────────────
+
+function buildGrid() {
+  const g = document.getElementById('grid'); g.innerHTML='';
+  for (let i=0;i<4;i++) for (let j=0;j<4;j++) {
+    const c = document.createElement('div');
+    c.className = 'cell' + (i===3&&j===3?' goal':'');
+    c.innerHTML = `<div class="heat"></div><div class="arrow">${i===3&&j===3?'★':'→'}</div><div class="val">0.000</div><div class="coord">(${i},${j})</div>`;
+    g.appendChild(c);
+  }
+  const ax = document.getElementById('axis-x'), ay = document.getElementById('axis-y');
+  ax.innerHTML=''; ay.innerHTML='';
+  for (let j=0;j<4;j++) { const d=document.createElement('div'); d.className='axis-x-label'; d.textContent='col '+j; ax.appendChild(d); }
+  for (let i=0;i<4;i++) { const d=document.createElement('div'); d.className='axis-y-label'; d.textContent=i; ay.appendChild(d); }
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+
+buildGrid();
+document.getElementById('concept-text').innerHTML = CONCEPTS.pi;
+checkHealth().then(() => doReset());
+
+// Re-check health every 10s
+setInterval(checkHealth, 10000);
+</script>
+</body>
+</html>
