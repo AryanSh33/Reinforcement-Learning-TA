@@ -19,15 +19,19 @@ Built with Python + Flask API, it allows:
 ![Main Interface](RL_op1.png)
 ![Step Execution](RL_op2.png)
 🔹 **Step Execution View**
-
-📌 *Replace these with your actual screenshots inside /images/*
+![](RL_TA_STEP.gif)
 
 ## 📊 Graphs
 
 📈 **Iteration vs Delta (Convergence Curve)**
 
+
+![](iteration_vs_delta.png)
+
 📈 **Iteration vs Reward**
 
+
+![](iteration_vs_reward.png)
 ## ⚙️ Features
 
 - 4×4 Grid World Environment
